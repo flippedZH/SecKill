@@ -34,11 +34,14 @@ public class RedisConfig {
         redisTemplate.setConnectionFactory(redisConnectionFactory);
         return redisTemplate;
     }
+
+    //调用脚本的配置
     @Bean
     public DefaultRedisScript<Long> script() {
         DefaultRedisScript<Long> redisScript = new DefaultRedisScript<>();
         // stock.lua 脚本位置 和 application.yaml 同级目录
         redisScript.setLocation(new ClassPathResource("stock.lua"));
+        //返回值类型
         redisScript.setResultType(Long.class);
         return redisScript;
     }

@@ -26,9 +26,10 @@ public enum  RespBeanEnum {
     //秒杀模块
     EMPTY_STOCK(500400,"库存不足"),
     REPEATE_ERROR(500500,"一人一件"),
-
+    REQURST_ILLEGAL(500900,"请求非法"),
+    ERROR_CAPTCHA(501000,"验证码错误"),
     SESSION_ERROR(1111111,"用户未登录"),
-    ACCESS_LIMIT_REACHED(111111,"xxx"),
+    ACCESS_LIMIT_REACHED(501100,"访问过于频繁，稍后再试"),
 
 
     //密码更新
@@ -37,6 +38,7 @@ public enum  RespBeanEnum {
 
     //订单信息
     ORDER_NOT_EXIST(500800,"订单信息不存在"),
+
     ;
 
     private final Integer code;

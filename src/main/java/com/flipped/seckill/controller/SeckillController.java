@@ -4,6 +4,8 @@ package com.flipped.seckill.controller;
 import com.alibaba.druid.support.json.JSONUtils;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.flipped.seckill.config.AccessLimit;
+import com.flipped.seckill.exception.GlobalException;
 import com.flipped.seckill.pojo.SeckillMessage;
 import com.flipped.seckill.pojo.TOrder;
 import com.flipped.seckill.pojo.TSeckillOrder;
@@ -16,23 +18,31 @@ import com.flipped.seckill.vo.GoodsVo;
 import com.flipped.seckill.vo.RespBean;
 import com.flipped.seckill.vo.RespBeanEnum;
 import com.sun.org.apache.xpath.internal.operations.Bool;
+import com.wf.captcha.ArithmeticCaptcha;
+import lombok.extern.slf4j.Slf4j;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.util.CollectionUtils;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Description: no desc
@@ -41,6 +51,7 @@ import java.util.Map;
  * Time: 17:15
  */
 
+@Slf4j
 @Controller
 @RequestMapping("/seckill")
 public class SeckillController implements InitializingBean {
@@ -60,7 +71,32 @@ public class SeckillController implements InitializingBean {
     @Autowired
     private MQSender mqsender;
 
+    @Autowired
+    private RedisScript<Long> redisScript;
+
     private Map<Long,Boolean> EmptyStockMap=new HashMap<>();
+
+
+
+    //根据 user + goodsId获取秒杀地址
+    @RequestMapping(value="/path",method=RequestMethod.GET)
+    @ResponseBody
+    @AccessLimit(second = 5,maxCount = 5,needLogin = true)   //限流  5秒5次
+    public RespBean getPath(TUser user, Long goodsId, String captcha, HttpServletRequest request){
+        if(user==null){
+            return RespBean.error(RespBeanEnum.SESSION_ERROR);
+        }
+
+        //验证码校验（参数需要 user goodsid,因为redis存的时候的key就是这样生成的）
+//        boolean b = orderService.checkCaptcha(user, goodsId, captcha);
+//        if(!b){
+//            return  RespBean.error(RespBeanEnum.ERROR_CAPTCHA);
+//        }
+        //创建秒杀接口地址
+        String s=orderService.createPath(user,goodsId);
+        return RespBean.success(s);
+    }
+
 
     //系统初始化 时候 将商品库存数量加载到Redis
     @Override
@@ -115,12 +151,20 @@ public class SeckillController implements InitializingBean {
 
 
     //页面静态化
-    @RequestMapping(value = "/doSeckill",method = RequestMethod.POST)
+    @RequestMapping(value = "/{path}/doSeckill",method = RequestMethod.POST)
     @ResponseBody
-    public RespBean doSeckill( TUser user, Long goodsId){
+    public RespBean doSeckill( TUser user, Long goodsId,@PathVariable("path") String path){
         System.out.println("我拿到了user:"+user);
         if(null==user){
             return RespBean.error(RespBeanEnum.SESSION_ERROR);
+        }
+
+        ValueOperations valueOperations = redisTemplate.opsForValue();
+
+        //准备秒杀 对传递过来的 请求地址 进行校验
+        boolean check=orderService.checkPath(user,goodsId,path);
+        if(!check){
+            return RespBean.error(RespBeanEnum.REQURST_ILLEGAL);
         }
 
         //在redis中获取订单数据
@@ -135,10 +179,9 @@ public class SeckillController implements InitializingBean {
         if(EmptyStockMap.get(goodsId)){
             return RespBean.error(RespBeanEnum.EMPTY_STOCK);
         }
+
         //预减库存
-        ValueOperations valueOperations =redisTemplate.opsForValue();
-        //原子性 每调用一次减一
-        Long  stock =valueOperations.decrement("seckillGoods:"+goodsId);
+        Long stock = (Long) redisTemplate.execute(redisScript, Collections.singletonList("seckillGoods:" + goodsId), Collections.EMPTY_LIST);
 
         if(stock<0){
             EmptyStockMap.put(goodsId,true);
@@ -172,4 +215,30 @@ public class SeckillController implements InitializingBean {
         Long orderId = seckillOrderService.getResult(user, goodsId);
         return RespBean.success(orderId);
     }
+
+    @RequestMapping(value = "/captcha", method = RequestMethod.GET)
+    @ResponseBody
+    public void verifyCode(TUser user, Long goodsId, HttpServletResponse response) {
+        if (user == null || goodsId < 0) {
+            throw new GlobalException(RespBeanEnum.REQURST_ILLEGAL);
+        }
+        // 设置请求头
+        response.setContentType("image/jpg");
+        response.setHeader("Pragma", "No-cache");
+        response.setHeader("Cache-Control", "No-cache");
+        response.setDateHeader("Expires", 0);
+
+        //生成验证码
+        ArithmeticCaptcha captcha = new ArithmeticCaptcha(130, 32, 3);
+        // captcha.text()
+        redisTemplate.opsForValue().set("captcha:" + user.getId() + ":" + goodsId,"0", 300,
+                TimeUnit.SECONDS);
+        try {
+            captcha.out(response.getOutputStream());
+        } catch (IOException e) {
+            log.error("验证码生成失败", e.getMessage());
+        }
+    }
+
+
 }

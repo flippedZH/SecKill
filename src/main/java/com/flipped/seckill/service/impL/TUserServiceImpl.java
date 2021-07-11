@@ -105,7 +105,6 @@ public class TUserServiceImpl   extends ServiceImpl<TUserMapper, TUser> implemen
     @Override
     public RespBean updatePassword(String userTicket, String password, HttpServletRequest request, HttpServletResponse response) {
         TUser user = getUserByCookie(userTicket, request, response);
-
         if (user == null) {
             throw new GlobalException(RespBeanEnum.MOBILE_NOT_EXIST);
         }

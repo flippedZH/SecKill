@@ -30,20 +30,33 @@ public class AccessLimitInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+
+        ///handler--指要拦截的对象
+
+        //如果拦截器处理的对象--是一个方法
         if (handler instanceof HandlerMethod) {
+            //在拦截器中 获取当前user：  取代之前的参数拦截
             TUser user = getUser(request, response);
+            //通过拦截器获取的参数放入UserContext中  用于参数解析器解析 用于mvc请求方法统一使用
             UserContext.setUser(user);
+            //强转  ---方法处理器
             HandlerMethod hm = (HandlerMethod) handler;
+            //获取方法上面的注解
             AccessLimit accessLimit = hm.getMethodAnnotation(AccessLimit.class);
+            //没有注解--无需拦截  直接返回
             if (accessLimit == null) {
                 return true;
             }
+            //有注解 --获取参数
             int second = accessLimit.second();
             int maxCount = accessLimit.maxCount();
             boolean needLogin = accessLimit.needLogin();
+
+            //处理注解逻辑
             String key = request.getRequestURI();
             if (needLogin) {
                 if (user == null) {
+                    //构建返回对象 --返回json数据类型
                     render(response, RespBeanEnum.SESSION_ERROR);
                     return false;
                 }
@@ -56,7 +69,7 @@ public class AccessLimitInterceptor implements HandlerInterceptor {
             if (null == count) {
                 valueOperations.set(key, 1, second, TimeUnit.SECONDS);
             } else if (count < maxCount) {
-                valueOperations.increment(key + ":" + user.getId());
+                valueOperations.increment(key);
             } else {
                 render(response, RespBeanEnum.ACCESS_LIMIT_REACHED);
                 return false;

@@ -11,15 +11,19 @@ import com.flipped.seckill.pojo.TSeckillGoods;
 import com.flipped.seckill.pojo.TSeckillOrder;
 import com.flipped.seckill.pojo.TUser;
 import com.flipped.seckill.service.ITOrderService;
+import com.flipped.seckill.utils.MD5Util;
 import com.flipped.seckill.vo.GoodsVo;
 import com.flipped.seckill.vo.OrderDetailVo;
 import com.flipped.seckill.vo.RespBeanEnum;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -38,6 +42,8 @@ public class TOrderServiceImpl extends ServiceImpl<TOrderMapper, TOrder> impleme
 
     @Autowired
     private  TOrderMapper orderMapper;
+
+
 
     @Autowired
     private TGoodsMapper goodsMapper;
@@ -125,5 +131,40 @@ public class TOrderServiceImpl extends ServiceImpl<TOrderMapper, TOrder> impleme
 
         //拼接并返回
         return detailVo;
+    }
+
+    //获取秒杀地址
+    @Override
+    public String createPath(TUser user, Long goodsId) {
+        //生成随机码
+        UUID uuid = UUID.randomUUID();
+        String s = MD5Util.md5(uuid + "12345");
+        //存入redis 60妙失效
+        redisTemplate.opsForValue().set("seckillPath:"+user.getId()+":"+goodsId,s,60, TimeUnit.SECONDS);
+        return s;
+    }
+
+    //校验秒杀地址：
+    @Override
+    public boolean checkPath(TUser user, Long goodsId, String path) {
+        //健壮性校验
+        if(user==null||goodsId<0|| StringUtils.isEmpty(path)){
+            return false;
+        }
+        //redis取出生成时存入的path
+        String redisPath=(String)redisTemplate.opsForValue().get("seckillPath:"+user.getId()+":"+goodsId);
+        //校验
+        return path.equals(redisPath);
+    }
+
+    //校验验证码
+    @Override
+    public boolean checkCaptcha(TUser user, Long goodsId, String captcha) {
+        if (user == null || StringUtils.isEmpty(captcha) || goodsId < 0) {
+            return false;
+        }
+        //比对输入的值和存的值是否相同
+        String redisCaptcha = (String) redisTemplate.opsForValue().get("captcha:" + user.getId() + ":" + goodsId);
+        return captcha.equals(redisCaptcha);
     }
 }
